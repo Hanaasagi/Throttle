@@ -8,13 +8,14 @@ from .storage import LocalStorage
 class BaseThrottle:
 
 
-    def __init__(self, rate, identify_name):
+    def __init__(self, rate, identify_name, callback):
         """
         :param rate: limit/duration etc. 1/s 2/m
         :return:     class instance
         """
         self.limit, self.duration = self.parse_rate(rate)
         self.identify_name = identify_name
+        self.callback = callback
 
 
     def parse_rate(self, rate):
@@ -38,8 +39,11 @@ class BaseThrottle:
 
 
     def get_identify(self, func, *args, **kwargs):
+        if callable(self.identify_name):
+            return self.identify_name()
         signature = inspect.signature(func)
         bind_arg = signature.bind(*args, **kwargs).arguments
+        # request.remote_addr or self.get_remote_addr()
         name_level_list = self.identify_name.split('.')
         identify = bind_arg.get(name_level_list[0])
         for name in name_level_list[1:]:
@@ -53,18 +57,18 @@ class BaseThrottle:
         return identify
 
 
-
 class Throttle(BaseThrottle):
 
-    def __init__(self, rate, identify_name):
-        super().__init__(rate, identify_name)
-        self.storage = LocalStorage()
+    def __init__(self, rate, identify_name, callback,
+                    max_len=100):
+        super().__init__(rate, identify_name, callback)
+        self.storage = LocalStorage(max_len)
 
 
     def enable_pass(self, key):
         result = self.storage.get(key)
         if result is None:
-            self.storage(key, 1, expire=self.duration)
+            self.storage.set(key, 1, seconds=self.duration)
         else:
             count = int(result)
             if count < self.limit:
@@ -77,19 +81,21 @@ class Throttle(BaseThrottle):
 
     def __call__(self, func):
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            if self.enable_pass('ababab'):
+        def wrapper(*args, **kwargs):
+            identify = self.get_identify(func, *args, **kwargs)
+            if self.enable_pass(identify):
                 return func(*args, **kwargs)
             else:
-                print('trigger the throttle')
+                return self.callback(*args, **kwargs)
         return wrapper
 
 
 class RedisThrottle(BaseThrottle):
 
 
-    def __init__(self, rate, identify_name, host='localhost', port=6379, password=''):
-        super().__init__(rate, identify_name)
+    def __init__(self, rate, identify_name, callback,
+                    host='localhost', port=6379, password=''):
+        super().__init__(rate, identify_name, callback)
         self.storage = RedisStorage(host, port, password)
 
 
@@ -123,9 +129,7 @@ class RedisThrottle(BaseThrottle):
             if await self.enable_pass(identify):
                 return await func(*args, **kwargs)
             else:
-                # TODO
-                from sanic.response import text
-                return text('trigger the throttle', status=503)
+                return self.callback(*args, **kwargs)
         return wrapper
 
 
