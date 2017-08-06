@@ -1,4 +1,6 @@
+import re
 import functools
+import inspect
 from .storage import RedisStorage
 from .storage import LocalStorage
 
@@ -6,13 +8,13 @@ from .storage import LocalStorage
 class BaseThrottle:
 
 
-    def __init__(self, rate):
+    def __init__(self, rate, identify_name):
         """
         :param rate: limit/duration etc. 1/s 2/m
         :return:     class instance
         """
         self.limit, self.duration = self.parse_rate(rate)
-        # TODO
+        self.identify_name = identify_name
 
 
     def parse_rate(self, rate):
@@ -35,24 +37,40 @@ class BaseThrottle:
             return num, duration
 
 
+    def get_identify(self, func, *args, **kwargs):
+        signature = inspect.signature(func)
+        bind_arg = signature.bind(*args, **kwargs).arguments
+        name_level_list = self.identify_name.split('.')
+        identify = bind_arg.get(name_level_list[0])
+        for name in name_level_list[1:]:
+            if name.endswith(')'):
+                # a function or method, call it
+               capture = re.search(r'(.*)\((.*)\)', name)
+               groups = capture.groups()
+               identify = getattr(identify, groups[0])(groups[1].split(','))
+            else:
+                identify = getattr(identify, name)
+        return identify
+
+
 
 class Throttle(BaseThrottle):
 
-    def __init__(self, rate):
-        super().__Init__(rate)
+    def __init__(self, rate, identify_name):
+        super().__init__(rate, identify_name)
         self.storage = LocalStorage()
 
 
     def enable_pass(self, key):
-        result = storage.get(key)
+        result = self.storage.get(key)
         if result is None:
-            storage(key, 1, expire=self.duration)
+            self.storage(key, 1, expire=self.duration)
         else:
             count = int(result)
             if count < self.limit:
-                storage.incr(key)
+                self.storage.incr(key)
             else:
-                storage.expire(key, self.duration)
+                self.storage.expire(key, self.duration)
                 return False
         return True
 
@@ -60,7 +78,7 @@ class Throttle(BaseThrottle):
     def __call__(self, func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            if self.enable_pass('ababab')
+            if self.enable_pass('ababab'):
                 return func(*args, **kwargs)
             else:
                 print('trigger the throttle')
@@ -70,8 +88,8 @@ class Throttle(BaseThrottle):
 class RedisThrottle(BaseThrottle):
 
 
-    def __init__(self, rate, host='localhost', port=6379, password=6379):
-        super().__init__(rate)
+    def __init__(self, rate, identify_name, host='localhost', port=6379, password=''):
+        super().__init__(rate, identify_name)
         self.storage = RedisStorage(host, port, password)
 
 
@@ -101,7 +119,8 @@ class RedisThrottle(BaseThrottle):
         """
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            if await self.enable_pass('ababab'):
+            identify = self.get_identify(func, *args, **kwargs)
+            if await self.enable_pass(identify):
                 return await func(*args, **kwargs)
             else:
                 # TODO

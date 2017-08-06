@@ -5,7 +5,7 @@ from throttle import RedisThrottle
 app = Sanic()
 
 @app.route("/")
-@RedisThrottle("5/m")
+@RedisThrottle("5/m", "request.remote_addr")
 async def test(request):
     return json({"hello": "world"})
 

@@ -1,5 +1,6 @@
 from setuptools import setup
 
+
 setup(
     name='Throttle',
     version='0.1.1',
@@ -10,4 +11,3 @@ setup(
     packages=['throttle', 'throttle.storage'],
     license='MIT',
 )
-
