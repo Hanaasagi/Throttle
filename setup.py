@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 
 setup(
-    name='Throttle',
+    name='throttle',
     version='0.1.1',
     description='throttle',
     url='https://github.com/Hanaasagi/Throttle',
