@@ -1,14 +1,18 @@
 from sanic import Sanic
 from sanic.response import json, text
-from throttle import RedisThrottle
+from throttle import AsyncThrottle
+from throttle.storage import RedisStorage
 
 
 app = Sanic()
 
+
 @app.route("/")
-@RedisThrottle("5/m", "request.remote_addr",
-                    callback=lambda *args, **kwargs:
-                        text('tirgger the throttle', status=503))
+@AsyncThrottle("5/m", "request.remote_addr",
+               callback=lambda *args, **kwargs:
+                   text('tirgger the throttle', status=503),
+               storage=RedisStorage('localhost',
+                                    port=6379, password=''))
 async def test(request):
     return json({"hello": "world"})
 

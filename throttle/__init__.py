@@ -1,25 +1,24 @@
 import re
 import functools
 import inspect
-from .storage import RedisStorage
-from .storage import LocalStorage
 
 
 class BaseThrottle:
 
-
-    def __init__(self, rate, identify_name, callback):
+    def __init__(self, rate, identify_getter, callback, storage):
         """
-        :param rate: limit/duration etc. 1/s 2/m
-        :return:     class instance
+        :param rate:          limit/duration etc. 1/s 2/m
+        :param identify_getter: a name or a callable use for geting identify
+        :param callback:      how to do when exceed limit
+        :return:              class instance
         """
         self.limit, self.duration = self.parse_rate(rate)
-        self.identify_name = identify_name
+        self.identify_getter = identify_getter
         self.callback = callback
-
+        self.storage = storage
 
     def parse_rate(self, rate):
-        """convert 'num/duration' string to a tuple (num, duration)
+        """convert 'limit/duration' string to a tuple (limit, duration)
         :param rate: 'limit/duration' etc. '1/s' '2/m'
         :return:     a tuple (limit, duration)
         """
@@ -37,33 +36,44 @@ class BaseThrottle:
         else:
             return num, duration
 
-
     def get_identify(self, func, *args, **kwargs):
-        if callable(self.identify_name):
-            return self.identify_name()
+        """get the identify"""
+        # if it's a callable, just call and return
+        if callable(self.identify_getter):
+            return self.identify_getter()
+        # if it's a string, like 'request.remote_addr' or 'self.get_remote_addr()'
+        # so bind the signature and get 'request' from args or kwargs
         signature = inspect.signature(func)
         bind_arg = signature.bind(*args, **kwargs).arguments
-        # request.remote_addr or self.get_remote_addr()
-        name_level_list = self.identify_name.split('.')
+        name_level_list = self.identify_getter.split('.')
         identify = bind_arg.get(name_level_list[0])
         for name in name_level_list[1:]:
+            # solve nested name level
             if name.endswith(')'):
-                # a function or method, call it
-               capture = re.search(r'(.*)\((.*)\)', name)
-               groups = capture.groups()
-               identify = getattr(identify, groups[0])(groups[1].split(','))
+                # a function or method, pick up name and parameters, call it
+                capture = re.search(r'(.*)\((.*)\)', name)
+                groups = capture.groups()
+                identify = getattr(identify, groups[0])(groups[1].split(','))
             else:
                 identify = getattr(identify, name)
         return identify
 
+    def enable_pass(self, key):
+        """whether pass the request
+        :param key: a string ident eg. client IP
+        :return:    boolean
+        """
+        raise NotImplementedError
 
-class Throttle(BaseThrottle):
+    def __call__(self, func):
+        """decorate a function which want to throttle
+        :param func: the method or function you want to decorate
+        :return: a wrapper
+        """
+        raise NotImplementedError
 
-    def __init__(self, rate, identify_name, callback,
-                    max_len=100):
-        super().__init__(rate, identify_name, callback)
-        self.storage = LocalStorage(max_len)
 
+class SyncThrottle(BaseThrottle):
 
     def enable_pass(self, key):
         result = self.storage.get(key)
@@ -78,7 +88,6 @@ class Throttle(BaseThrottle):
                 return False
         return True
 
-
     def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -90,20 +99,9 @@ class Throttle(BaseThrottle):
         return wrapper
 
 
-class RedisThrottle(BaseThrottle):
-
-
-    def __init__(self, rate, identify_name, callback,
-                    host='localhost', port=6379, password=''):
-        super().__init__(rate, identify_name, callback)
-        self.storage = RedisStorage(host, port, password)
-
+class AsyncThrottle(BaseThrottle):
 
     async def enable_pass(self, key):
-        """whether pass the request
-        :param key: a string ident eg. client IP
-        :return:    boolean
-        """
         storage = await self.storage.connect()
         result = await storage.get(key)  # str or None
         if result is None:
@@ -117,12 +115,7 @@ class RedisThrottle(BaseThrottle):
                 return False
         return True
 
-
     def __call__(self, func):
-        """decorate a function which want to throttle
-        :param func: the method or function you want to decorate
-        :return: a wrapper
-        """
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             identify = self.get_identify(func, *args, **kwargs)
@@ -133,4 +126,4 @@ class RedisThrottle(BaseThrottle):
         return wrapper
 
 
-__all__ = ['Throttle', 'RedisThrottle']
+__all__ = ['SyncThrottle', 'AsyncThrottle']

@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 setup(
@@ -8,6 +8,7 @@ setup(
     url='https://github.com/Hanaasagi/Throttle',
     author='Hanaasagi',
     author_email='ambiguous404@gmail.com',
-    packages=['throttle', 'throttle.storage'],
+    packages=find_packages(),
+    install_requires=['aioredis'],
     license='MIT',
 )

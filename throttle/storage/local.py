@@ -36,7 +36,6 @@ class LocalStorage:
         self.data = OrderedDict()
         self.lock = RLock()
 
-
     def __getitem__(self, key):
         with self.lock:
             try:
@@ -58,10 +57,8 @@ class LocalStorage:
                 return None
             return value
 
-
     def get(self, key):
         return self[key]
-
 
     def __setitem__(self, key, value):
         with self.lock:
@@ -71,19 +68,16 @@ class LocalStorage:
                 self.data.popitem(last=False)
             self.data[key] = value
 
-
     def set(self, key, value, seconds=None):
         self.data[key] = value
         if seconds is not None:
             self.expired_map[key] = time.monotonic() + seconds
-
 
     def incr(self, key):
         value = self.data[key] or 0
         if not isinstance(value, int):
             raise TypeError("only Integer can incr")
         self.data[key] = value + 1
-
 
     def expire(self, key, seconds):
         if key in self.data:
